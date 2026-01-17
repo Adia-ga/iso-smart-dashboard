@@ -1,7 +1,7 @@
 """
 דשבורד חכם לניהול משימות ISO/BRC 2.0
 ISO Smart Dashboard 2.0 - Task Management for Audit Preparation
-Updated to work with ISO BRC TASKS. updated.xlsx
+Firestore Edition - Cloud Database Backend
 Dark Mode Edition with Neon Color Palette
 """
 
@@ -13,13 +13,21 @@ from datetime import datetime, date
 from pathlib import Path
 
 # ============================================
+# Firebase Imports / ייבוא Firebase
+# ============================================
+
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# ============================================
 # הגדרות כלליות / General Configuration
 # ============================================
 
-EXCEL_FILE = "ISO BRC TASKS. updated.xlsx"
+SERVICE_ACCOUNT_KEY = "serviceAccountKey.json"
+COLLECTION_NAME = "tasks"
 TARGET_DATE = datetime(2026, 6, 1)
 
-# כותרות הקובץ / File Headers (from right to left in Excel)
+# כותרות הקובץ / File Headers
 HEADERS = ["מס\"ד", "תקן", "קטגוריה", "תת-קטגוריה", "סעיף", "משימה", 
            "תיאור מפורט", "מחלקה", "תאריך יעד", "עדיפות", "סטטוס", "הערות", "משך משוער"]
 
@@ -46,7 +54,7 @@ STATUS_COLORS = {
     "בוצע": "#39FF14",       # Neon Lime
     "נתקע": "#FF00FF",       # Neon Magenta
     "בטיפול": "#FFFF00",     # Neon Yellow
-    "טרם התחיל": "#007FFF"   # Electric Blue
+    "טרם התחיל": "#00FFFF"   # Neon Cyan
 }
 
 # מיפוי צבעי ניאון לעדיפות / Neon colors for priority
@@ -60,52 +68,165 @@ PRIORITY_COLORS = {
 NEON_COLOR_SEQUENCE = ["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00", "#007FFF"]
 
 # ============================================
+# אתחול Firebase / Firebase Initialization
+# ============================================
+
+@st.cache_resource
+def initialize_firebase():
+    """
+    מאתחל את Firebase (פעם אחת בלבד).
+    Initializes Firebase (once only, cached).
+    """
+    try:
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(SERVICE_ACCOUNT_KEY)
+            firebase_admin.initialize_app(cred)
+        return firestore.client()
+    except Exception as e:
+        st.error(f"❌ שגיאה באתחול Firebase: {str(e)}")
+        return None
+
+# Initialize Firebase
+db = initialize_firebase()
+
+# ============================================
 # פונקציות עזר / Helper Functions
 # ============================================
 
 def load_data() -> pd.DataFrame:
     """
-    טוען נתונים מקובץ האקסל הקיים.
-    Loads data from the existing Excel file.
+    טוען נתונים מ-Firestore.
+    Loads data from Firestore.
     """
     try:
-        file_path = Path(EXCEL_FILE)
+        if db is None:
+            st.error("❌ לא מחובר ל-Firebase!")
+            return pd.DataFrame(columns=HEADERS + ["doc_id"])
         
-        if not file_path.exists():
-            st.error(f"❌ הקובץ {EXCEL_FILE} לא נמצא! ודא שהקובץ קיים בתיקייה.")
-            return pd.DataFrame(columns=HEADERS)
+        # Query all documents from the tasks collection
+        docs = db.collection(COLLECTION_NAME).stream()
         
-        # טעינת הנתונים הקיימים / Load existing data
-        df = pd.read_excel(EXCEL_FILE, engine='openpyxl')
+        # Convert to list of dictionaries with doc_id
+        records = []
+        for doc in docs:
+            record = doc.to_dict()
+            # Add the document ID for update/delete operations
+            record["doc_id"] = doc.id
+            # Remove metadata fields
+            record.pop("_uploaded_at", None)
+            record.pop("_source_row", None)
+            records.append(record)
         
-        # המרת עמודת תאריך לפורמט datetime / Convert date column to datetime
-        if "תאריך יעד" in df.columns and not df.empty:
-            df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], dayfirst=True, errors='coerce').dt.date
+        if not records:
+            st.info("📝 אין משימות ב-Firestore. הוסף משימות חדשות בטבלה למטה.")
+            return pd.DataFrame(columns=HEADERS + ["doc_id"])
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(records)
+        
+        # Handle date column - convert string to date object
+        if "תאריך יעד" in df.columns:
+            def parse_date(val):
+                if val is None or pd.isna(val):
+                    return None
+                try:
+                    if isinstance(val, str):
+                        # Try different date formats
+                        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]:
+                            try:
+                                return datetime.strptime(val, fmt).date()
+                            except:
+                                continue
+                    return None
+                except:
+                    return None
+            
+            df["תאריך יעד"] = df["תאריך יעד"].apply(parse_date)
+        
+        # Ensure doc_id is the last column
+        if "doc_id" in df.columns:
+            cols = [c for c in df.columns if c != "doc_id"] + ["doc_id"]
+            df = df[cols]
         
         return df
     
-    except PermissionError:
-        st.error("❌ הקובץ פתוח בתוכנה אחרת. סגור את האקסל ורענן את הדף.")
-        return pd.DataFrame(columns=HEADERS)
-    
     except Exception as e:
-        st.error(f"❌ שגיאה בטעינת הנתונים: {str(e)}")
-        return pd.DataFrame(columns=HEADERS)
+        st.error(f"❌ שגיאה בטעינת נתונים מ-Firestore: {str(e)}")
+        return pd.DataFrame(columns=HEADERS + ["doc_id"])
 
 
 def save_data(df: pd.DataFrame) -> bool:
     """
-    שומר את הנתונים לקובץ האקסל.
-    Saves data to the Excel file.
+    שומר את הנתונים ל-Firestore.
+    Saves data to Firestore.
+    Updates existing documents or creates new ones.
     """
     try:
-        df.to_excel(EXCEL_FILE, index=False, engine='openpyxl')
-        return True
-    except PermissionError:
-        st.error("❌ לא ניתן לשמור - הקובץ פתוח בתוכנה אחרת. סגור את האקסל ונסה שוב.")
-        return False
+        if db is None:
+            st.error("❌ לא מחובר ל-Firebase!")
+            return False
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, row in df.iterrows():
+            try:
+                # Convert row to dictionary
+                row_data = row.to_dict()
+                
+                # Extract doc_id (if exists)
+                doc_id = row_data.pop("doc_id", None)
+                
+                # Convert date to string for Firestore
+                if "תאריך יעד" in row_data and row_data["תאריך יעד"] is not None:
+                    if isinstance(row_data["תאריך יעד"], (date, datetime)):
+                        row_data["תאריך יעד"] = row_data["תאריך יעד"].strftime("%Y-%m-%d")
+                
+                # Clean None values and convert numpy types
+                cleaned_data = {}
+                for key, value in row_data.items():
+                    if pd.isna(value):
+                        cleaned_data[key] = None
+                    elif hasattr(value, 'item'):  # numpy type
+                        cleaned_data[key] = value.item()
+                    else:
+                        cleaned_data[key] = value
+                
+                # Add timestamp
+                cleaned_data["_updated_at"] = firestore.SERVER_TIMESTAMP
+                
+                if doc_id and doc_id != "" and not pd.isna(doc_id):
+                    # Update existing document
+                    db.collection(COLLECTION_NAME).document(doc_id).set(cleaned_data)
+                else:
+                    # Create new document
+                    db.collection(COLLECTION_NAME).add(cleaned_data)
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                st.error(f"❌ שגיאה בשמירת שורה {index}: {str(e)}")
+        
+        return success_count > 0
+    
     except Exception as e:
-        st.error(f"❌ שגיאה בשמירת הנתונים: {str(e)}")
+        st.error(f"❌ שגיאה בשמירת נתונים ל-Firestore: {str(e)}")
+        return False
+
+
+def delete_document(doc_id: str) -> bool:
+    """
+    מוחק מסמך מ-Firestore.
+    Deletes a document from Firestore.
+    """
+    try:
+        if db is None:
+            return False
+        db.collection(COLLECTION_NAME).document(doc_id).delete()
+        return True
+    except Exception as e:
+        st.error(f"❌ שגיאה במחיקת מסמך: {str(e)}")
         return False
 
 
@@ -218,6 +339,13 @@ st.markdown("""
         font-size: 1.3rem;
         margin-bottom: 2rem;
         text-shadow: 0 0 5px #FF00FF;
+    }
+    
+    .cloud-badge {
+        text-align: center;
+        color: #39FF14 !important;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
     }
     
     /* ============================================ */
@@ -426,6 +554,7 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">📋 ISO Smart Dashboard 2.0</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-title">מערכת ניהול משימות להכנה לביקורת ISO/BRC</p>', unsafe_allow_html=True)
+st.markdown('<p class="cloud-badge">☁️ מחובר ל-Firebase Cloud</p>', unsafe_allow_html=True)
 
 # ============================================
 # ספירה לאחור / Countdown Section
@@ -462,10 +591,10 @@ st.markdown("### 📊 סקירת סטטוס")
 if not df.empty and "סטטוס" in df.columns:
     total_tasks = len(df)
     critical_tasks = len(df[df["עדיפות"] == "קריטי"]) if "עדיפות" in df.columns else 0
-    in_progress_tasks = len(df[df["סטטוס"] == "בטיפול"])
-    done_tasks = len(df[df["סטטוס"] == "בוצע"])
-    stuck_tasks = len(df[df["סטטוס"] == "נתקע"])
-    not_started = len(df[df["סטטוס"] == "טרם התחיל"])
+    in_progress_tasks = len(df[df["סטטוס"].str.contains("בטיפול", na=False)])
+    done_tasks = len(df[df["סטטוס"].str.contains("בוצע", na=False)])
+    stuck_tasks = len(df[df["סטטוס"].str.contains("נתקע", na=False)])
+    not_started = len(df[df["סטטוס"].str.contains("טרם התחיל", na=False)])
     
     # ============================================
     # שורת KPI - 3 מדדים עיקריים / KPI Row - 3 Main Metrics
@@ -502,7 +631,10 @@ if not df.empty and "סטטוס" in df.columns:
     st.markdown("#### 🥧 התפלגות סטטוס משימות")
     
     # הכנת נתונים לתרשים / Prepare data for chart
-    status_counts = df["סטטוס"].value_counts().reset_index()
+    # Clean status values for chart (remove emoji prefixes)
+    df_chart = df.copy()
+    df_chart["סטטוס_נקי"] = df_chart["סטטוס"].str.replace(r"^[^\w]+", "", regex=True).str.strip()
+    status_counts = df_chart["סטטוס_נקי"].value_counts().reset_index()
     status_counts.columns = ["סטטוס", "כמות"]
     
     # צבעי ניאון לסטטוסים / Neon colors for statuses
@@ -618,7 +750,9 @@ with filter_col4:
 filtered_df = df.copy()
 
 if status_filter:
-    filtered_df = filtered_df[filtered_df["סטטוס"].isin(status_filter)]
+    # Handle status filter with partial matching (for emoji prefixes)
+    mask = filtered_df["סטטוס"].apply(lambda x: any(s in str(x) for s in status_filter))
+    filtered_df = filtered_df[mask]
 
 if priority_filter:
     filtered_df = filtered_df[filtered_df["עדיפות"].isin(priority_filter)]
@@ -641,10 +775,16 @@ st.divider()
 # ============================================
 
 st.markdown("### ✏️ ניהול משימות")
-st.caption(f"💡 מוצגות {len(filtered_df)} משימות מתוך {len(df)} | עריכה ישירה בטבלה. השינויים נשמרים אוטומטית.")
+st.caption(f"💡 מוצגות {len(filtered_df)} משימות מתוך {len(df)} | עריכה ישירה בטבלה. לחץ 'שמור שינויים' לעדכון ב-Cloud.")
 
 # הגדרת עמודות / Column Configuration
 column_config = {
+    "doc_id": st.column_config.TextColumn(
+        "doc_id",
+        help="מזהה מסמך Firestore - אל תערוך!",
+        disabled=True,
+        width="small"
+    ),
     "מס\"ד": st.column_config.NumberColumn(
         "מס\"ד",
         help="מספר סידורי",
@@ -718,30 +858,33 @@ column_config = {
     )
 }
 
+# Columns to display (hide doc_id from main view but keep in data)
+display_columns = [c for c in filtered_df.columns if c != "doc_id"]
+
 # עורך הנתונים / Data Editor
 edited_df = st.data_editor(
     filtered_df,
     column_config=column_config,
+    column_order=display_columns + ["doc_id"],  # doc_id at the end
     num_rows="dynamic",
     use_container_width=True,
     hide_index=True,
     key="task_editor"
 )
 
-# שמירת שינויים / Save Changes
-# Need to merge edited rows back to original df if filters are applied
-if not filtered_df.equals(edited_df):
-    if status_filter or priority_filter or standard_filter or dept_filter:
-        # When filters are applied, we need to update the original df
-        # This is a simplified approach - replace the filtered portion
-        st.warning("⚠️ שימו לב: בעת עריכה עם פילטרים פעילים, נא לרענן לאחר השמירה")
-        if save_data(edited_df):
-            st.success("✅ השינויים נשמרו בהצלחה!")
-            st.rerun()
-    else:
-        if save_data(edited_df):
-            st.success("✅ השינויים נשמרו בהצלחה!")
-            st.rerun()
+# כפתור שמירה / Save Button
+col_save, col_refresh = st.columns(2)
+
+with col_save:
+    if st.button("💾 שמור שינויים ל-Cloud", use_container_width=True, type="primary"):
+        with st.spinner("שומר ל-Firestore..."):
+            if save_data(edited_df):
+                st.success("✅ השינויים נשמרו בהצלחה ל-Firebase!")
+                st.rerun()
+
+with col_refresh:
+    if st.button("🔄 רענן מ-Cloud", use_container_width=True):
+        st.rerun()
 
 st.divider()
 
@@ -751,18 +894,16 @@ st.divider()
 
 st.markdown("### 🛠️ פעולות מהירות")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 
 with col1:
-    if st.button("🔄 רענן נתונים", use_container_width=True):
-        st.rerun()
-
-with col2:
     if st.button("📥 הורד לאקסל", use_container_width=True):
         # יצוא לאקסל / Export to Excel
         try:
+            # Remove doc_id from export
+            export_df = edited_df.drop(columns=["doc_id"], errors="ignore")
             output_file = "ISO_tasks_export.xlsx"
-            edited_df.to_excel(output_file, index=False, engine='openpyxl')
+            export_df.to_excel(output_file, index=False, engine='openpyxl')
             with open(output_file, "rb") as f:
                 st.download_button(
                     label="📥 לחץ להורדה",
@@ -773,23 +914,26 @@ with col2:
         except Exception as e:
             st.error(f"שגיאה בייצוא: {str(e)}")
 
-with col3:
+with col2:
     if st.button("🗑️ נקה משימות שבוצעו", use_container_width=True):
         if not df.empty and "סטטוס" in df.columns:
-            filtered_out = df[df["סטטוס"] != "בוצע"]
-            if len(filtered_out) < len(df):
-                if save_data(filtered_out):
-                    st.success(f"✅ נמחקו {len(df) - len(filtered_out)} משימות שבוצעו!")
-                    st.rerun()
+            done_docs = df[df["סטטוס"].str.contains("בוצע", na=False)]
+            if len(done_docs) > 0:
+                with st.spinner("מוחק משימות שבוצעו..."):
+                    deleted = 0
+                    for _, row in done_docs.iterrows():
+                        if "doc_id" in row and delete_document(row["doc_id"]):
+                            deleted += 1
+                    if deleted > 0:
+                        st.success(f"✅ נמחקו {deleted} משימות שבוצעו!")
+                        st.rerun()
             else:
                 st.info("אין משימות שבוצעו למחיקה.")
 
-with col4:
+with col3:
     if st.button("⬆️ סדר לפי עדיפות", use_container_width=True):
         sorted_df = sort_by_priority(df)
-        if save_data(sorted_df):
-            st.success("✅ הטבלה מוינה לפי עדיפות!")
-            st.rerun()
+        st.info("💡 המיון מוצג בטבלה למעלה (לא משנה את הסדר ב-Cloud)")
 
 # ============================================
 # סיכום לפי תקנים / Summary by Standard
@@ -805,7 +949,7 @@ if not df.empty and "תקן" in df.columns:
         # סיכום לפי תקן / Summary by Standard
         standard_summary = df.groupby("תקן").agg({
             "משימה": "count",
-            "סטטוס": lambda x: (x == "בוצע").sum()
+            "סטטוס": lambda x: x.str.contains("בוצע", na=False).sum()
         }).rename(columns={"משימה": "סה״כ", "סטטוס": "הושלמו"})
         standard_summary["אחוז השלמה"] = (standard_summary["הושלמו"] / standard_summary["סה״כ"] * 100).round(1).astype(str) + "%"
         st.dataframe(standard_summary, use_container_width=True)
@@ -815,7 +959,7 @@ if not df.empty and "תקן" in df.columns:
         if "מחלקה" in df.columns:
             dept_summary = df.groupby("מחלקה").agg({
                 "משימה": "count",
-                "סטטוס": lambda x: (x == "בוצע").sum()
+                "סטטוס": lambda x: x.str.contains("בוצע", na=False).sum()
             }).rename(columns={"משימה": "סה״כ", "סטטוס": "הושלמו"})
             dept_summary["אחוז השלמה"] = (dept_summary["הושלמו"] / dept_summary["סה״כ"] * 100).round(1).astype(str) + "%"
             st.dataframe(dept_summary, use_container_width=True)
@@ -827,7 +971,7 @@ if not df.empty and "תקן" in df.columns:
 st.divider()
 st.markdown(f"""
 <div class="footer-text">
-    <p>🌟 ISO Smart Dashboard 2.0 | Dark Mode Edition | נבנה עם ❤️ ב-Streamlit</p>
-    <p style="font-size: 0.8rem; color: #007FFF;">קובץ נתונים: {EXCEL_FILE} | עדכון אחרון: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>
+    <p>🌟 ISO Smart Dashboard 2.0 | ☁️ Firebase Cloud Edition | נבנה עם ❤️ ב-Streamlit</p>
+    <p style="font-size: 0.8rem; color: #007FFF;">Collection: {COLLECTION_NAME} | עדכון אחרון: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>
 </div>
 """, unsafe_allow_html=True)
