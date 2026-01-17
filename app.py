@@ -2,11 +2,13 @@
 דשבורד חכם לניהול משימות ISO/BRC 2.0
 ISO Smart Dashboard 2.0 - Task Management for Audit Preparation
 Updated to work with ISO BRC TASKS. updated.xlsx
+Dark Mode Edition with Neon Color Palette
 """
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, date
 from pathlib import Path
 
@@ -27,20 +29,35 @@ STATUS_OPTIONS = ["טרם התחיל", "בטיפול", "בוצע", "נתקע"]
 # אפשרויות עדיפות / Priority Options
 PRIORITY_OPTIONS = ["קריטי", "רגיל", "נמוך"]
 
-# מיפוי צבעים לסטטוסים / Status color mapping
-STATUS_COLORS = {
-    "בוצע": "#28a745",      # ירוק / Green
-    "נתקע": "#dc3545",      # אדום / Red
-    "בטיפול": "#ffc107",    # כתום / Orange
-    "טרם התחיל": "#6c757d"  # אפור / Gray
+# ============================================
+# פלטת צבעים ניאון / Neon Color Palette
+# ============================================
+
+NEON_COLORS = {
+    "cyan": "#00FFFF",
+    "magenta": "#FF00FF",
+    "lime": "#39FF14",
+    "yellow": "#FFFF00",
+    "blue": "#007FFF"
 }
 
-# מיפוי צבעים לעדיפות / Priority color mapping
-PRIORITY_COLORS = {
-    "קריטי": "#dc3545",     # אדום / Red
-    "רגיל": "#17a2b8",      # כחול / Blue
-    "נמוך": "#6c757d"       # אפור / Gray
+# מיפוי צבעי ניאון לסטטוסים / Neon colors for statuses
+STATUS_COLORS = {
+    "בוצע": "#39FF14",       # Neon Lime
+    "נתקע": "#FF00FF",       # Neon Magenta
+    "בטיפול": "#FFFF00",     # Neon Yellow
+    "טרם התחיל": "#007FFF"   # Electric Blue
 }
+
+# מיפוי צבעי ניאון לעדיפות / Neon colors for priority
+PRIORITY_COLORS = {
+    "קריטי": "#FF00FF",      # Neon Magenta
+    "רגיל": "#00FFFF",       # Neon Cyan
+    "נמוך": "#007FFF"        # Electric Blue
+}
+
+# רשימת צבעי ניאון לתרשימים / Neon color sequence for charts
+NEON_COLOR_SEQUENCE = ["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00", "#007FFF"]
 
 # ============================================
 # פונקציות עזר / Helper Functions
@@ -63,7 +80,7 @@ def load_data() -> pd.DataFrame:
         
         # המרת עמודת תאריך לפורמט datetime / Convert date column to datetime
         if "תאריך יעד" in df.columns and not df.empty:
-            df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], errors='coerce').dt.date
+            df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], dayfirst=True, errors='coerce').dt.date
         
         return df
     
@@ -156,99 +173,249 @@ st.set_page_config(
 )
 
 # ============================================
-# עיצוב CSS מותאם / Custom CSS Styling
+# עיצוב CSS מותאם - מצב כהה / Dark Mode Custom CSS
 # ============================================
 
 st.markdown("""
 <style>
-    /* כללי / General */
+    /* ============================================ */
+    /* Dark Mode Base Styles */
+    /* ============================================ */
+    
+    /* Force dark background */
+    .stApp {
+        background-color: #0E1117 !important;
+    }
+    
     .main {
         direction: rtl;
         text-align: right;
+        background-color: #0E1117 !important;
     }
     
-    /* כותרת ראשית / Main Title */
+    /* All text to light color */
+    .stApp, .stApp p, .stApp span, .stApp label, .stApp div {
+        color: #FAFAFA !important;
+    }
+    
+    /* ============================================ */
+    /* Headers with Neon Glow */
+    /* ============================================ */
+    
     .main-title {
         text-align: center;
-        color: #1f77b4;
-        font-size: 2.5rem;
+        color: #00FFFF !important;
+        font-size: 3rem;
         font-weight: bold;
         margin-bottom: 0.5rem;
+        text-shadow: 0 0 10px #00FFFF, 0 0 20px #00FFFF, 0 0 30px #00FFFF;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     
     .sub-title {
         text-align: center;
-        color: #666;
-        font-size: 1.2rem;
+        color: #FF00FF !important;
+        font-size: 1.3rem;
         margin-bottom: 2rem;
+        text-shadow: 0 0 5px #FF00FF;
     }
     
-    /* ספירה לאחור / Countdown */
+    /* ============================================ */
+    /* Countdown Container - Neon Gradient */
+    /* ============================================ */
+    
     .countdown-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 15px;
-        padding: 2rem;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        border: 2px solid #00FFFF;
+        border-radius: 20px;
+        padding: 2.5rem;
         text-align: center;
-        color: white;
+        color: #FAFAFA;
         margin-bottom: 2rem;
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.3), 
+                    0 0 40px rgba(0, 255, 255, 0.1),
+                    inset 0 0 20px rgba(0, 255, 255, 0.05);
     }
     
     .countdown-number {
-        font-size: 4rem;
+        font-size: 5rem;
         font-weight: bold;
         margin: 0;
+        color: #00FFFF !important;
+        text-shadow: 0 0 20px #00FFFF, 0 0 40px #00FFFF;
     }
     
     .countdown-label {
-        font-size: 1.2rem;
-        opacity: 0.9;
+        font-size: 1.3rem;
+        opacity: 0.95;
+        color: #FAFAFA !important;
     }
+    
+    /* ============================================ */
+    /* Motivation Text - Neon Border */
+    /* ============================================ */
     
     .motivation-text {
-        background-color: #f8f9fa;
-        border-right: 4px solid #667eea;
+        background-color: rgba(26, 26, 46, 0.8);
+        border-right: 4px solid #FF00FF;
+        border-left: 1px solid #FF00FF;
+        padding: 1.2rem;
+        border-radius: 0 12px 12px 0;
+        margin: 1.5rem 0;
+        font-size: 1.2rem;
+        color: #FAFAFA !important;
+        box-shadow: 0 0 15px rgba(255, 0, 255, 0.2);
+    }
+    
+    /* ============================================ */
+    /* KPI Cards */
+    /* ============================================ */
+    
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 1px solid #00FFFF;
+        border-radius: 15px;
         padding: 1rem;
-        border-radius: 0 8px 8px 0;
-        margin: 1rem 0;
-        font-size: 1.1rem;
+        box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
     }
     
-    /* סטטיסטיקות / Statistics */
-    .stat-card {
-        background: white;
-        border-radius: 10px;
-        padding: 1.5rem;
-        text-align: center;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        border-top: 4px solid;
+    [data-testid="stMetricLabel"] {
+        color: #00FFFF !important;
     }
     
-    /* טבלת משימות / Task Table */
+    [data-testid="stMetricValue"] {
+        color: #FAFAFA !important;
+        font-size: 2rem !important;
+    }
+    
+    [data-testid="stMetricDelta"] {
+        color: #39FF14 !important;
+    }
+    
+    /* ============================================ */
+    /* Section Headers */
+    /* ============================================ */
+    
+    h3, .stMarkdown h3 {
+        color: #00FFFF !important;
+        text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+        border-bottom: 1px solid rgba(0, 255, 255, 0.3);
+        padding-bottom: 0.5rem;
+    }
+    
+    h4, .stMarkdown h4 {
+        color: #FF00FF !important;
+        text-shadow: 0 0 5px rgba(255, 0, 255, 0.5);
+    }
+    
+    /* ============================================ */
+    /* Data Editor / Table Styling */
+    /* ============================================ */
+    
     .stDataEditor {
         direction: rtl;
     }
     
-    /* כפתורים / Buttons */
+    [data-testid="stDataFrame"], 
+    [data-testid="stDataEditor"] {
+        background-color: #1a1a2e !important;
+        border: 1px solid #007FFF;
+        border-radius: 10px;
+    }
+    
+    /* ============================================ */
+    /* Buttons - Neon Style */
+    /* ============================================ */
+    
     .stButton > button {
         width: 100%;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 1px solid #00FFFF;
+        color: #00FFFF !important;
+        border-radius: 10px;
+        padding: 0.5rem 1rem;
+        transition: all 0.3s ease;
     }
     
-    /* Badge styles */
-    .badge-critical {
-        background-color: #dc3545;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.85em;
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #00FFFF 0%, #007FFF 100%);
+        color: #0E1117 !important;
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
     }
     
-    .badge-done {
-        background-color: #28a745;
-        color: white;
-        padding: 2px 8px;
+    /* ============================================ */
+    /* Multiselect / Selectbox */
+    /* ============================================ */
+    
+    .stMultiSelect, .stSelectbox {
+        background-color: #1a1a2e;
+    }
+    
+    [data-baseweb="select"] {
+        background-color: #1a1a2e !important;
+        border-color: #007FFF !important;
+    }
+    
+    /* ============================================ */
+    /* Progress Bar - Neon */
+    /* ============================================ */
+    
+    .stProgress > div > div {
+        background-color: #39FF14 !important;
+        box-shadow: 0 0 10px #39FF14;
+    }
+    
+    /* ============================================ */
+    /* Dividers */
+    /* ============================================ */
+    
+    hr {
+        border-color: rgba(0, 255, 255, 0.3) !important;
+    }
+    
+    /* ============================================ */
+    /* Checkbox */
+    /* ============================================ */
+    
+    .stCheckbox label span {
+        color: #FAFAFA !important;
+    }
+    
+    /* ============================================ */
+    /* Footer */
+    /* ============================================ */
+    
+    .footer-text {
+        text-align: center;
+        color: #007FFF !important;
+        padding: 1.5rem;
+        font-size: 0.9rem;
+    }
+    
+    .footer-text a {
+        color: #00FFFF !important;
+    }
+    
+    /* ============================================ */
+    /* Scrollbar - Dark Theme */
+    /* ============================================ */
+    
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #0E1117;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #007FFF;
         border-radius: 4px;
-        font-size: 0.85em;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #00FFFF;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -338,12 +505,12 @@ if not df.empty and "סטטוס" in df.columns:
     status_counts = df["סטטוס"].value_counts().reset_index()
     status_counts.columns = ["סטטוס", "כמות"]
     
-    # צבעים מותאמים לסטטוסים / Custom colors for statuses
-    color_map = {
-        "בוצע": "#28a745",
-        "נתקע": "#dc3545",
-        "בטיפול": "#ffc107",
-        "טרם התחיל": "#6c757d"
+    # צבעי ניאון לסטטוסים / Neon colors for statuses
+    neon_color_map = {
+        "בוצע": "#39FF14",       # Neon Lime
+        "נתקע": "#FF00FF",       # Neon Magenta
+        "בטיפול": "#FFFF00",     # Neon Yellow
+        "טרם התחיל": "#00FFFF"   # Neon Cyan
     }
     
     fig = px.pie(
@@ -352,26 +519,35 @@ if not df.empty and "סטטוס" in df.columns:
         names="סטטוס",
         title="",
         color="סטטוס",
-        color_discrete_map=color_map,
-        hole=0.4  # Donut style
+        color_discrete_map=neon_color_map,
+        hole=0.45  # Donut style
     )
     
+    # עיצוב תרשים כהה / Dark theme chart styling
     fig.update_layout(
-        font=dict(size=14),
+        font=dict(size=14, color="#FAFAFA", family="Segoe UI"),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=-0.2,
+            y=-0.25,
             xanchor="center",
-            x=0.5
+            x=0.5,
+            font=dict(color="#FAFAFA", size=12)
         ),
-        margin=dict(t=20, b=20, l=20, r=20)
+        margin=dict(t=30, b=30, l=30, r=30),
+        paper_bgcolor="rgba(0,0,0,0)",  # Transparent background
+        plot_bgcolor="rgba(0,0,0,0)",   # Transparent plot area
+        showlegend=True
     )
     
     fig.update_traces(
         textposition='inside',
         textinfo='percent+label',
-        textfont_size=12
+        textfont=dict(size=13, color="#0E1117", family="Segoe UI"),
+        marker=dict(
+            line=dict(color='#0E1117', width=2)  # Dark border between slices
+        ),
+        hovertemplate="<b>%{label}</b><br>כמות: %{value}<br>אחוז: %{percent}<extra></extra>"
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -649,9 +825,9 @@ if not df.empty and "תקן" in df.columns:
 # ============================================
 
 st.divider()
-st.markdown("""
-<div style="text-align: center; color: #888; padding: 1rem;">
-    <p>ISO Smart Dashboard 2.0 | נבנה עם ❤️ ב-Streamlit</p>
-    <p style="font-size: 0.8rem;">קובץ נתונים: {} | עדכון אחרון: {}</p>
+st.markdown(f"""
+<div class="footer-text">
+    <p>🌟 ISO Smart Dashboard 2.0 | Dark Mode Edition | נבנה עם ❤️ ב-Streamlit</p>
+    <p style="font-size: 0.8rem; color: #007FFF;">קובץ נתונים: {EXCEL_FILE} | עדכון אחרון: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>
 </div>
-""".format(EXCEL_FILE, datetime.now().strftime("%d/%m/%Y %H:%M")), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
