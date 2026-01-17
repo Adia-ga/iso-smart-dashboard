@@ -6,6 +6,7 @@ Updated to work with ISO BRC TASKS. updated.xlsx
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from datetime import datetime, date
 from pathlib import Path
 
@@ -286,10 +287,10 @@ st.divider()
 df = load_data()
 
 # ============================================
-# סטטיסטיקות / Statistics Section
+# סטטיסטיקות / Statistics Section (Status Overview)
 # ============================================
 
-st.markdown("### 📊 סיכום מצב משימות")
+st.markdown("### 📊 סקירת סטטוס")
 
 if not df.empty and "סטטוס" in df.columns:
     total_tasks = len(df)
@@ -299,42 +300,81 @@ if not df.empty and "סטטוס" in df.columns:
     stuck_tasks = len(df[df["סטטוס"] == "נתקע"])
     not_started = len(df[df["סטטוס"] == "טרם התחיל"])
     
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # ============================================
+    # שורת KPI - 3 מדדים עיקריים / KPI Row - 3 Main Metrics
+    # ============================================
     
-    with col1:
+    kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+    
+    with kpi_col1:
         st.metric(
-            label="📋 סה״כ משימות",
+            label="📋 סה\"כ משימות",
             value=total_tasks,
             delta=None
         )
     
-    with col2:
+    with kpi_col2:
         st.metric(
-            label="🔴 קריטי",
-            value=critical_tasks,
-            delta=f"{(critical_tasks/total_tasks*100):.0f}%" if total_tasks > 0 else "0%"
-        )
-    
-    with col3:
-        st.metric(
-            label="🟡 בטיפול",
-            value=in_progress_tasks,
-            delta=f"{(in_progress_tasks/total_tasks*100):.0f}%" if total_tasks > 0 else "0%"
-        )
-    
-    with col4:
-        st.metric(
-            label="🟢 בוצע",
+            label="✅ משימות שבוצעו",
             value=done_tasks,
-            delta=f"{(done_tasks/total_tasks*100):.0f}%" if total_tasks > 0 else "0%"
+            delta=f"{(done_tasks/total_tasks*100):.1f}%" if total_tasks > 0 else "0%"
         )
     
-    with col5:
+    with kpi_col3:
         st.metric(
-            label="⚫ נתקע",
-            value=stuck_tasks,
-            delta=f"{(stuck_tasks/total_tasks*100):.0f}%" if total_tasks > 0 else "0%"
+            label="🚨 לטיפול מיידי",
+            value=critical_tasks,
+            delta="קריטי" if critical_tasks > 0 else None,
+            delta_color="inverse"
         )
+    
+    # ============================================
+    # תרשים עוגה - התפלגות סטטוס / Pie Chart - Status Distribution
+    # ============================================
+    
+    st.markdown("#### 🥧 התפלגות סטטוס משימות")
+    
+    # הכנת נתונים לתרשים / Prepare data for chart
+    status_counts = df["סטטוס"].value_counts().reset_index()
+    status_counts.columns = ["סטטוס", "כמות"]
+    
+    # צבעים מותאמים לסטטוסים / Custom colors for statuses
+    color_map = {
+        "בוצע": "#28a745",
+        "נתקע": "#dc3545",
+        "בטיפול": "#ffc107",
+        "טרם התחיל": "#6c757d"
+    }
+    
+    fig = px.pie(
+        status_counts,
+        values="כמות",
+        names="סטטוס",
+        title="",
+        color="סטטוס",
+        color_discrete_map=color_map,
+        hole=0.4  # Donut style
+    )
+    
+    fig.update_layout(
+        font=dict(size=14),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=dict(t=20, b=20, l=20, r=20)
+    )
+    
+    fig.update_traces(
+        textposition='inside',
+        textinfo='percent+label',
+        textfont_size=12
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
     
     # פס התקדמות / Progress Bar
     if total_tasks > 0:
