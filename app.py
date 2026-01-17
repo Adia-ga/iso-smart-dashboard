@@ -1,172 +1,133 @@
-"""
-דשבורד חכם לניהול משימות ISO/BRC 2.0
-ISO Smart Dashboard 2.0 - Task Management for Audit Preparation
-Firestore Edition - Cloud Database Backend
-Dark Mode Edition with Neon Color Palette
-"""
-
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from datetime import datetime, date
-
-# ============================================
-# Firebase Imports / ייבוא Firebase
-# ============================================
-
 import firebase_admin
 from firebase_admin import credentials, firestore
 
 # ============================================
-# הגדרות כלליות / General Configuration
+# הגדרות ראשיות
 # ============================================
-
 SERVICE_ACCOUNT_KEY = "serviceAccountKey.json"
 COLLECTION_NAME = "tasks"
 TARGET_DATE = datetime(2026, 6, 1)
 
-# כותרות הקובץ / File Headers
-HEADERS = ["מס\"ד", "תקן", "קטגוריה", "תת-קטגוריה", "סעיף", "משימה", 
-           "תיאור מפורט", "מחלקה", "תאריך יעד", "עדיפות", "סטטוס", "הערות", "משך משוער"]
-
-# אפשרויות סטטוס / Status Options
-STATUS_OPTIONS = ["טרם התחיל", "בטיפול", "בוצע", "נתקע"]
-
-# אפשרויות עדיפות / Priority Options
-PRIORITY_OPTIONS = ["קריטי", "רגיל", "נמוך"]
-
 # ============================================
-# אתחול Firebase / Firebase Initialization
+# הגדרת הדף (חייב להיות בהתחלה)
 # ============================================
+st.set_page_config(page_title="ISO Dashboard", page_icon="📋", layout="wide")
 
-@st.cache_resource
-def initialize_firebase():
-    """
-    מאתחל את Firebase (פעם אחת בלבד).
-    """
-    try:
-        if not firebase_admin._apps:
-            # בדיקה: האם אנחנו בענן של Streamlit?
-            if "firebase" in st.secrets:
-                # Cloud Mode: שימוש במפתח מהכספת
-                # יצירת מילון מתוך אובייקט הסודות
-                key_dict = dict(st.secrets["firebase"])
-                cred = credentials.Certificate(key_dict)
-                firebase_admin.initialize_app(cred)
-            else:
-                # Local Mode: שימוש בקובץ המקומי
-                try:
-                    cred = credentials.Certificate(SERVICE_ACCOUNT_KEY)
-                    firebase_admin.initialize_app(cred)
-                except FileNotFoundError:
-                    st.error(f"❌ קובץ '{SERVICE_ACCOUNT_KEY}' לא נמצא! (וודאי שאת במצב מקומי)")
-                    return None
-        
-        return firestore.client()
-    
-    except Exception as e:
-        st.error(f"❌ שגיאה באתחול Firebase: {str(e)}")
-        return None
-
-# Initialize Firebase
-db = initialize_firebase()
-
-# ============================================
-# פונקציות עזר / Helper Functions
-# ============================================
-
-def load_data() -> pd.DataFrame:
-    try:
-        if db is None:
-            return pd.DataFrame(columns=HEADERS + ["doc_id"])
-        
-        docs = db.collection(COLLECTION_NAME).stream()
-        records = []
-        for doc in docs:
-            record = doc.to_dict()
-            record["doc_id"] = doc.id
-            # ניקוי שדות טכניים
-            record.pop("_uploaded_at", None)
-            record.pop("_source_row", None)
-            records.append(record)
-        
-        if not records:
-            return pd.DataFrame(columns=HEADERS + ["doc_id"])
-        
-        df = pd.DataFrame(records)
-        
-        # המרת תאריכים
-        if "תאריך יעד" in df.columns:
-            def parse_date(val):
-                if val is None or pd.isna(val): return None
-                try:
-                    if isinstance(val, str):
-                        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]:
-                            try: return datetime.strptime(val, fmt).date()
-                            except: continue
-                    return None
-                except: return None
-            
-            df["תאריך יעד"] = df["תאריך יעד"].apply(parse_date)
-        
-        return df
-    
-    except Exception as e:
-        st.error(f"❌ שגיאה בטעינת נתונים: {str(e)}")
-        return pd.DataFrame(columns=HEADERS + ["doc_id"])
-
-def save_data(df: pd.DataFrame) -> bool:
-    try:
-        if db is None: return False
-        
-        for index, row in df.iterrows():
-            row_data = row.to_dict()
-            doc_id = row_data.pop("doc_id", None)
-            
-            # המרת תאריך למחרוזת
-            if "תאריך יעד" in row_data and isinstance(row_data["תאריך יעד"], (date, datetime)):
-                row_data["תאריך יעד"] = row_data["תאריך יעד"].strftime("%Y-%m-%d")
-            
-            cleaned_data = {k: (v.item() if hasattr(v, 'item') else v) for k, v in row_data.items() if not pd.isna(v)}
-            cleaned_data["_updated_at"] = firestore.SERVER_TIMESTAMP
-            
-            if doc_id and doc_id != "":
-                db.collection(COLLECTION_NAME).document(doc_id).set(cleaned_data)
-            else:
-                db.collection(COLLECTION_NAME).add(cleaned_data)
-        return True
-    except Exception as e:
-        st.error(f"❌ שגיאה בשמירה: {str(e)}")
-        return False
-
-def get_countdown() -> dict:
-    delta = TARGET_DATE - datetime.now()
-    return {"days": delta.days, "weeks": delta.days // 7, "months": delta.days // 30}
-
-# ============================================
-# הגדרת הדף / Page Configuration
-# ============================================
-
-st.set_page_config(page_title="ISO Smart Dashboard", page_icon="📋", layout="wide")
-
-# ============================================
-# עיצוב CSS / Styling
-# ============================================
-
+# עיצוב
 st.markdown("""
 <style>
-    .stApp { background-color: #0E1117 !important; color: #FAFAFA !important; }
-    .main-title { text-align: center; color: #00FFFF !important; font-size: 3rem; text-shadow: 0 0 10px #00FFFF; }
-    .countdown-container { background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%); border: 2px solid #00FFFF; border-radius: 20px; padding: 2rem; text-align: center; margin-bottom: 2rem; }
-    .countdown-number { font-size: 4rem; color: #00FFFF !important; font-weight: bold; }
-    [data-testid="stMetricValue"] { color: #FAFAFA !important; }
+    .stApp { background-color: #0E1117; color: white; }
+    .neon-text { color: #00FFFF; text-shadow: 0 0 10px #00FFFF; text-align: center; font-size: 3em; font-weight: bold; }
+    .countdown-box { border: 2px solid #00FFFF; padding: 20px; border-radius: 15px; text-align: center; margin: 20px 0; background: #1a1a2e; }
+    .big-num { font-size: 3em; color: #00FFFF; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# כותרת וספירה לאחור / Header & Countdown
+# חיבור למסד הנתונים
 # ============================================
+@st.cache_resource
+def get_db():
+    try:
+        # בדיקה אם כבר מחובר
+        if not firebase_admin._apps:
+            # ניסיון 1: חיבור דרך הענן (Secrets)
+            if "firebase" in st.secrets:
+                cred = credentials.Certificate(dict(st.secrets["firebase"]))
+                firebase_admin.initialize_app(cred)
+            # ניסיון 2: חיבור מקומי (קובץ במחשב)
+            else:
+                cred = credentials.Certificate(SERVICE_ACCOUNT_KEY)
+                firebase_admin.initialize_app(cred)
+        return firestore.client()
+    except Exception as e:
+        st.error(f"תקלת חיבור: {e}")
+        return None
 
-st.markdown('<h1 class="main-title">📋 ISO Smart Dashboard 2.0</h1>', unsafe_allow_html=True)
+db = get_db()
 
-countdown = get_countdown()
+# ============================================
+# פונקציות לוגיקה
+# ============================================
+def get_countdown():
+    delta = TARGET_DATE - datetime.now()
+    return delta.days, delta.days // 7
+
+def save_task(df_delta):
+    # פונקציה לשמירת נתונים
+    if db is None: return
+    for index, row in df_delta.iterrows():
+        data = row.to_dict()
+        # המרת תאריכים לטקסט
+        if isinstance(data.get("תאריך יעד"), (date, datetime)):
+            data["תאריך יעד"] = data["תאריך יעד"].strftime("%Y-%m-%d")
+        
+        # שמירה (אם יש מזהה מעדכן, אם אין יוצר חדש)
+        doc_id = data.pop("doc_id", None)
+        if doc_id:
+            db.collection(COLLECTION_NAME).document(doc_id).set(data)
+        else:
+            db.collection(COLLECTION_NAME).add(data)
+
+def load_tasks():
+    # טעינת נתונים
+    if db is None: return pd.DataFrame()
+    docs = db.collection(COLLECTION_NAME).stream()
+    items = []
+    for doc in docs:
+        d = doc.to_dict()
+        d["doc_id"] = doc.id
+        items.append(d)
+    
+    if not items: return pd.DataFrame(columns=["משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
+    return pd.DataFrame(items)
+
+# ============================================
+# תצוגה ראשית
+# ============================================
+st.markdown('<div class="neon-text">📋 ISO Smart Dashboard 2.0</div>', unsafe_allow_html=True)
+
+# שעון עצר
+days, weeks = get_countdown()
+st.markdown(f"""
+<div class="countdown-box">
+    <div>נותרו לביקורת ISO/BRC:</div>
+    <div class="big-num">{days} ימים</div>
+    <div>(כ-{weeks} שבועות)</div>
+</div>
+""", unsafe_allow_html=True)
+
+# טעינת המשימות
+df = load_tasks()
+
+# סטטיסטיקה מהירה
+c1, c2, c3 = st.columns(3)
+c1.metric("סה\"כ משימות", len(df))
+done = len(df[df['סטטוס'] == 'בוצע']) if 'סטטוס' in df.columns else 0
+c2.metric("✅ בוצעו", done)
+c3.metric("📅 תאריך יעד", "01/06/2026")
+
+st.markdown("### ✏️ רשימת משימות")
+
+# טבלה לעריכה
+edited_df = st.data_editor(
+    df,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="editor",
+    column_config={
+        "doc_id": st.column_config.TextColumn(disabled=True),
+        "סטטוס": st.column_config.SelectboxColumn(options=["טרם התחיל", "בטיפול", "בוצע", "נתקע"], required=True),
+        "עדיפות": st.column_config.SelectboxColumn(options=["רגיל", "גבוה", "קריטי"], required=True),
+        "תאריך יעד": st.column_config.DateColumn(format="DD/MM/YYYY")
+    }
+)
+
+# כפתור שמירה
+if st.button("💾 שמור שינויים לענן", type="primary", use_container_width=True):
+    save_task(edited_df)
+    st.success("הנתונים נשמרו בהצלחה!")
+    st.rerun()
