@@ -169,4 +169,4 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">📋 ISO Smart Dashboard 2.0</h1>', unsafe_allow_html=True)
 
-countdown = get_
+countdown = get_countdown()
