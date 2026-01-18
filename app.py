@@ -5,67 +5,26 @@ from datetime import datetime, date
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# ============================================
-# הגדרות עמוד
-# ============================================
-st.set_page_config(
-    page_title="ISO Smart Dashboard 2.0",
-    page_icon="📋",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# --- הגדרות עמוד ---
+st.set_page_config(page_title="ISO Smart Dashboard", page_icon="📋", layout="wide")
 
-# ============================================
-# עיצוב CSS - ניאון וסייברפאנק
-# ============================================
+# --- עיצוב CSS ---
 st.markdown("""
 <style>
-    /* רקע כללי */
-    .stApp {
-        background-color: #0E1117 !important;
-        color: #FAFAFA !important;
-    }
-    
-    /* כותרות */
-    .main-title {
-        text-align: center;
-        color: #00FFFF !important;
-        font-size: 3.5rem;
-        font-weight: bold;
-        text-shadow: 0 0 10px #00FFFF;
-    }
-    
-    /* קופסת ספירה */
-    .countdown-container {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        border: 2px solid #00FFFF;
-        border-radius: 20px;
-        padding: 20px;
-        text-align: center;
-        margin-bottom: 30px;
-    }
-    .countdown-number {
-        font-size: 4rem;
-        font-weight: bold;
-        color: #00FFFF !important;
-    }
-    
-    /* עיצוב מדדים */
+    .stApp { background-color: #0E1117 !important; color: #FAFAFA !important; }
+    .main-title { text-align: center; color: #00FFFF !important; font-size: 3rem; font-weight: bold; text-shadow: 0 0 10px #00FFFF; }
+    .countdown-box { background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%); border: 2px solid #00FFFF; border-radius: 20px; padding: 20px; text-align: center; margin-bottom: 20px; }
+    .cnt-num { font-size: 4rem; font-weight: bold; color: #00FFFF; }
     [data-testid="stMetricValue"] { color: #00FFFF !important; }
     [data-testid="stMetricLabel"] { color: #FAFAFA !important; }
-    [data-testid="stMetric"] {
-        background-color: #1a1a2e;
-        border: 1px solid #FF00FF;
-    }
+    [data-testid="stMetric"] { background-color: #1a1a2e; border: 1px solid #FF00FF; }
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================
-# חיבור Firebase
-# ============================================
-SERVICE_ACCOUNT_KEY = "serviceAccountKey.json"
-COLLECTION_NAME = "tasks"
-TARGET_DATE = datetime(2026, 6, 1)
+# --- חיבור Firebase ---
+key_path = "serviceAccountKey.json"
+collection_name = "tasks"
+target_date = datetime(2026, 6, 1)
 
 @st.cache_resource
 def get_db():
@@ -75,82 +34,100 @@ def get_db():
                 cred = credentials.Certificate(dict(st.secrets["firebase"]))
                 firebase_admin.initialize_app(cred)
             else:
-                cred = credentials.Certificate(SERVICE_ACCOUNT_KEY)
+                cred = credentials.Certificate(key_path)
                 firebase_admin.initialize_app(cred)
         return firestore.client()
     except Exception as e:
-        st.error(f"שגיאת חיבור: {e}")
+        st.error(f"Error: {e}")
         return None
 
 db = get_db()
 
-# ============================================
-# לוגיקה
-# ============================================
-def get_countdown():
-    delta = TARGET_DATE - datetime.now()
-    return delta.days, delta.days // 7
-
-def load_tasks():
+# --- לוגיקה ---
+def load_data():
     if db is None: return pd.DataFrame()
     try:
-        docs = db.collection(COLLECTION_NAME).stream()
-        items = []
-        for doc in docs:
-            d = doc.to_dict()
-            d["doc_id"] = doc.id
-            items.append(d)
-        
-        df = pd.DataFrame(items)
+        docs = db.collection(collection_name).stream()
+        data = [{"doc_id": doc.id, **doc.to_dict()} for doc in docs]
+        df = pd.DataFrame(data)
         
         if df.empty:
             return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
 
-        # === טיפול בטור 'מסד' ===
         if "מסד" in df.columns:
-            # הופך את הטור למספרים נקיים וממיין
             df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
             df = df.sort_values(by="מסד", ascending=True)
         else:
             df["מסד"] = 0
 
-        # המרת תאריכים
         if "תאריך יעד" in df.columns:
             df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], errors='coerce').dt.date
-        
-        # מילוי חוסרים
-        if "סטטוס" not in df.columns: df["סטטוס"] = "טרם התחיל"
-        if "עדיפות" not in df.columns: df["עדיפות"] = "רגיל"
-        
+
         return df.fillna("")
-    except Exception as e:
-        st.error(f"שגיאה בטעינה: {e}")
+    except:
         return pd.DataFrame()
 
-def save_task(edited_df):
+def save_data(edited_df):
     if db is None: return
     try:
-        for index, row in edited_df.iterrows():
-            data = row.to_dict()
-            doc_id = data.pop("doc_id", None)
+        for i, row in edited_df.iterrows():
+            d = row.to_dict()
+            doc_id = d.pop("doc_id", None)
+            if isinstance(d.get("תאריך יעד"), (date, datetime)):
+                d["תאריך יעד"] = d["תאריך יעד"].strftime("%Y-%m-%d")
             
-            if isinstance(data.get("תאריך יעד"), (date, datetime)):
-                data["תאריך יעד"] = data["תאריך יעד"].strftime("%Y-%m-%d")
+            clean = {k: v for k, v in d.items() if v != "" and v is not None}
+            clean["_updated_at"] = firestore.SERVER_TIMESTAMP
             
-            clean_data = {k: v for k, v in data.items() if v != "" and v is not None}
-            clean_data["_updated_at"] = firestore.SERVER_TIMESTAMP
-                
             if doc_id and len(str(doc_id)) > 5:
-                db.collection(COLLECTION_NAME).document(doc_id).set(clean_data, merge=True)
+                db.collection(collection_name).document(doc_id).set(clean, merge=True)
             else:
-                db.collection(COLLECTION_NAME).add(clean_data)
+                db.collection(collection_name).add(clean)
         return True
-    except Exception as e:
-        st.error(f"שגיאה בשמירה: {e}")
+    except:
         return False
 
-# ============================================
-# UI - תצוגה
-# ============================================
+# --- תצוגה ---
+st.markdown('<div class="main-title">ISO Smart Dashboard</div>', unsafe_allow_html=True)
 
-st.markdown('<div class
+delta = target_date - datetime.now()
+st.markdown(f"""
+<div class="countdown-box">
+    <div style="color:#FAFAFA;">🎯 ימים לביקורת:</div>
+    <div class="cnt-num">{delta.days}</div>
+</div>
+""", unsafe_allow_html=True)
+
+df = load_data()
+
+if not df.empty:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📋 סה\"כ", len(df))
+    done_count = len(df[df['סטטוס'].astype(str).str.contains('בוצע')]) if 'סטטוס' in df.columns else 0
+    c2.metric("✅ בוצעו", done_count)
+    crit_count = len(df[df['עדיפות'] == 'קריטי']) if 'עדיפות' in df.columns else 0
+    c3.metric("🚨 קריטי", crit_count)
+    
+    st.divider()
+    
+    if 'סטטוס' in df.columns:
+        counts = df['סטטוס'].value_counts().reset_index()
+        counts.columns = ['סטטוס', 'כמות']
+        fig = px.pie(counts, values='כמות', names='סטטוס', hole=0.4,
+                     color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"])
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
+        st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+st.markdown("### ✏️ רשימת משימות (ממוין לפי מסד)")
+
+cols = ["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד"]
+final_cols = [c for c in cols if c in df.columns] + [c for c in df.columns if c not in cols]
+
+edited = st.data_editor(
+    df[final_cols],
+    num_rows="dynamic",
+    use_container_width=True,
+    key="editor",
+    column_config={
+        "doc_id": st.column_config.TextColumn(disabled=True),
