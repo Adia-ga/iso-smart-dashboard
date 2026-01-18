@@ -103,27 +103,23 @@ def load_tasks():
         
         df = pd.DataFrame(items)
         
-        # אם הטבלה ריקה לגמרי, ניצור לה מבנה בסיסי
         if df.empty:
             return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
 
-        # === טיפול בטור 'מסד' ===
+        # === טיפול בטור 'מסד' למיון ===
         if "מסד" in df.columns:
-            # הופך את הטור למספרים אמיתיים (כדי שהמיון יעבוד נכון)
-            # אם יש תא ריק, שם בו 0
+            # הופך את הטור למספרים נקיים
             df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
-            
-            # ממיין את הטבלה לפי הטור הזה (מהקטן לגדול)
+            # מיון לפי מסד
             df = df.sort_values(by="מסד", ascending=True)
         else:
-            # אם הטור לא קיים בכלל, נוסיף אותו ריק
             df["מסד"] = 0
 
         # המרת תאריכים
         if "תאריך יעד" in df.columns:
             df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], errors='coerce').dt.date
         
-        # מילוי ערכי ברירת מחדל
+        # מילוי חוסרים
         if "סטטוס" not in df.columns: df["סטטוס"] = "טרם התחיל"
         if "עדיפות" not in df.columns: df["עדיפות"] = "רגיל"
         
@@ -139,11 +135,9 @@ def save_task(edited_df):
             data = row.to_dict()
             doc_id = data.pop("doc_id", None)
             
-            # המרת תאריכים למחרוזת לשמירה
             if isinstance(data.get("תאריך יעד"), (date, datetime)):
                 data["תאריך יעד"] = data["תאריך יעד"].strftime("%Y-%m-%d")
             
-            # ניקוי נתונים
             clean_data = {k: v for k, v in data.items() if v != "" and v is not None}
             clean_data["_updated_at"] = firestore.SERVER_TIMESTAMP
                 
@@ -186,12 +180,34 @@ if not df.empty:
     
     st.divider()
 
-    # גרף
+    # גרף (כאן הייתה השגיאה קודם - תוקן)
     st.markdown("### 📊 תמונת מצב")
     if 'סטטוס' in df.columns:
         status_counts = df['סטטוס'].value_counts().reset_index()
         status_counts.columns = ['סטטוס', 'כמות']
-        fig = px.pie(status_counts, values='כמות', names='סטטוס', 
-                     color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"],
-                     hole=0.4)
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        
+        fig = px.pie(
+            status_counts, 
+            values='כמות', 
+            names='סטטוס', 
+            color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"],
+            hole=0.4
+        )
+        
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", 
+            plot_bgcolor="rgba(0,0,0,0)", 
+            font=dict(color="white")
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+
+# טבלה
+st.markdown("### ✏️ רשימת המשימות")
+
+# סידור עמודות - מסד ראשון
+cols = ["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד"]
+existing = [c for c in cols if c in df.columns]
+rest = [c for
