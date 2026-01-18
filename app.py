@@ -106,11 +106,10 @@ def load_tasks():
         if df.empty:
             return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
 
-        # === טיפול בטור 'מסד' למיון ===
+        # === טיפול בטור 'מסד' ===
         if "מסד" in df.columns:
-            # הופך את הטור למספרים נקיים
+            # הופך את הטור למספרים נקיים וממיין
             df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
-            # מיון לפי מסד
             df = df.sort_values(by="מסד", ascending=True)
         else:
             df["מסד"] = 0
@@ -154,60 +153,4 @@ def save_task(edited_df):
 # UI - תצוגה
 # ============================================
 
-st.markdown('<div class="main-title">ISO Smart Dashboard</div>', unsafe_allow_html=True)
-
-# שעון
-days, weeks = get_countdown()
-st.markdown(f"""
-<div class="countdown-container">
-    <div style="font-size:1.2rem; color:#FAFAFA;">🎯 זמן לביקורת:</div>
-    <div class="countdown-number">{days}</div>
-    <div style="font-size:1.2rem; color:#FAFAFA;">ימים</div>
-</div>
-""", unsafe_allow_html=True)
-
-# טעינה
-df = load_tasks()
-
-# מדדים
-if not df.empty:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("📋 סה\"כ", len(df))
-    done = len(df[df['סטטוס'].astype(str).str.contains('בוצע')]) if 'סטטוס' in df.columns else 0
-    c2.metric("✅ בוצעו", done)
-    critical = len(df[df['עדיפות'] == 'קריטי']) if 'עדיפות' in df.columns else 0
-    c3.metric("🚨 קריטי", critical)
-    
-    st.divider()
-
-    # גרף (כאן הייתה השגיאה קודם - תוקן)
-    st.markdown("### 📊 תמונת מצב")
-    if 'סטטוס' in df.columns:
-        status_counts = df['סטטוס'].value_counts().reset_index()
-        status_counts.columns = ['סטטוס', 'כמות']
-        
-        fig = px.pie(
-            status_counts, 
-            values='כמות', 
-            names='סטטוס', 
-            color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"],
-            hole=0.4
-        )
-        
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)", 
-            plot_bgcolor="rgba(0,0,0,0)", 
-            font=dict(color="white")
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-
-st.divider()
-
-# טבלה
-st.markdown("### ✏️ רשימת המשימות")
-
-# סידור עמודות - מסד ראשון
-cols = ["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד"]
-existing = [c for c in cols if c in df.columns]
-rest = [c for
+st.markdown('<div class
