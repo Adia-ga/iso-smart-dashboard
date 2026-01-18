@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # ============================================
-# עיצוב CSS - ניאון וסייברפאנק (נשאר אותו דבר)
+# עיצוב CSS - ניאון וסייברפאנק
 # ============================================
 st.markdown("""
 <style>
@@ -26,13 +26,13 @@ st.markdown("""
         color: #FAFAFA !important;
     }
     
-    /* כותרת ראשית */
+    /* כותרות */
     .main-title {
         text-align: center;
         color: #00FFFF !important;
         font-size: 3.5rem;
         font-weight: bold;
-        text-shadow: 0 0 10px #00FFFF, 0 0 20px #00FFFF;
+        text-shadow: 0 0 10px #00FFFF;
     }
     
     /* קופסת ספירה */
@@ -42,19 +42,15 @@ st.markdown("""
         border-radius: 20px;
         padding: 20px;
         text-align: center;
-        box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
         margin-bottom: 30px;
     }
-    
     .countdown-number {
         font-size: 4rem;
         font-weight: bold;
         color: #00FFFF !important;
-        text-shadow: 0 0 20px #00FFFF;
-        line-height: 1;
     }
-
-    /* תיקון צבעים למדדים */
+    
+    /* עיצוב מדדים */
     [data-testid="stMetricValue"] { color: #00FFFF !important; }
     [data-testid="stMetricLabel"] { color: #FAFAFA !important; }
     [data-testid="stMetric"] {
@@ -106,27 +102,30 @@ def load_tasks():
             items.append(d)
         
         df = pd.DataFrame(items)
+        
+        # אם הטבלה ריקה לגמרי, ניצור לה מבנה בסיסי
         if df.empty:
             return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
 
-        # === סידור העמודה 'מסד' ===
-        if "מסד" not in df.columns:
-            df["מסד"] = 0 # אם אין, נשים 0
-        
-        # המרה למספרים (כדי ש-2 לא יבוא אחרי 10)
-        df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
+        # === טיפול בטור 'מסד' ===
+        if "מסד" in df.columns:
+            # הופך את הטור למספרים אמיתיים (כדי שהמיון יעבוד נכון)
+            # אם יש תא ריק, שם בו 0
+            df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
+            
+            # ממיין את הטבלה לפי הטור הזה (מהקטן לגדול)
+            df = df.sort_values(by="מסד", ascending=True)
+        else:
+            # אם הטור לא קיים בכלל, נוסיף אותו ריק
+            df["מסד"] = 0
 
         # המרת תאריכים
         if "תאריך יעד" in df.columns:
             df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], errors='coerce').dt.date
         
-        # מילוי חוסרים
+        # מילוי ערכי ברירת מחדל
         if "סטטוס" not in df.columns: df["סטטוס"] = "טרם התחיל"
         if "עדיפות" not in df.columns: df["עדיפות"] = "רגיל"
-        
-        # === המיון הקובע! ===
-        # ממיין את הטבלה לפי טור 'מסד' בסדר עולה (1, 2, 3...)
-        df = df.sort_values(by="מסד", ascending=True)
         
         return df.fillna("")
     except Exception as e:
@@ -140,9 +139,11 @@ def save_task(edited_df):
             data = row.to_dict()
             doc_id = data.pop("doc_id", None)
             
+            # המרת תאריכים למחרוזת לשמירה
             if isinstance(data.get("תאריך יעד"), (date, datetime)):
                 data["תאריך יעד"] = data["תאריך יעד"].strftime("%Y-%m-%d")
             
+            # ניקוי נתונים
             clean_data = {k: v for k, v in data.items() if v != "" and v is not None}
             clean_data["_updated_at"] = firestore.SERVER_TIMESTAMP
                 
@@ -160,7 +161,6 @@ def save_task(edited_df):
 # ============================================
 
 st.markdown('<div class="main-title">ISO Smart Dashboard</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title" style="text-align:center; color:#FF00FF;">ניהול משימות מסודר לפי מס"ד</div>', unsafe_allow_html=True)
 
 # שעון
 days, weeks = get_countdown()
@@ -178,14 +178,14 @@ df = load_tasks()
 # מדדים
 if not df.empty:
     c1, c2, c3 = st.columns(3)
-    c1.metric("📋 סה\"כ משימות", len(df))
+    c1.metric("📋 סה\"כ", len(df))
     done = len(df[df['סטטוס'].astype(str).str.contains('בוצע')]) if 'סטטוס' in df.columns else 0
     c2.metric("✅ בוצעו", done)
     critical = len(df[df['עדיפות'] == 'קריטי']) if 'עדיפות' in df.columns else 0
     c3.metric("🚨 קריטי", critical)
     
     st.divider()
-    
+
     # גרף
     st.markdown("### 📊 תמונת מצב")
     if 'סטטוס' in df.columns:
@@ -194,53 +194,4 @@ if not df.empty:
         fig = px.pie(status_counts, values='כמות', names='סטטוס', 
                      color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"],
                      hole=0.4)
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", 
-                          font=dict(color="white"))
-        st.plotly_chart(fig, use_container_width=True)
-
-st.divider()
-
-# טבלה
-st.markdown("### ✏️ רשימת המשימות")
-
-# כאן אנחנו מגדירים ש'מסד' יופיע ראשון ויהיה מספר
-column_order = ["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד"]
-# מוודאים שכל העמודות קיימות ב-df לפני שמסדרים
-existing_cols = [c for c in column_order if c in df.columns]
-# מוסיפים את שאר העמודות (כמו doc_id) בסוף
-remaining_cols = [c for c in df.columns if c not in existing_cols]
-final_order = existing_cols + remaining_cols
-
-edited_df = st.data_editor(
-    df[final_order], # סידור העמודות
-    num_rows="dynamic",
-    use_container_width=True,
-    key="editor",
-    column_config={
-        "doc_id": st.column_config.TextColumn(disabled=True),
-        "מסד": st.column_config.NumberColumn(
-            "מס\"ד", 
-            help="מספר סידורי",
-            step=1,
-            format="%d" # מציג מספר שלם בלי פסיקים
-        ),
-        "משימה": st.column_config.TextColumn(width="large", required=True),
-        "סטטוס": st.column_config.SelectboxColumn(
-            options=["טרם התחיל", "בטיפול", "בוצע", "נתקע"],
-            required=True
-        ),
-        "עדיפות": st.column_config.SelectboxColumn(
-            options=["רגיל", "גבוה", "קריטי"],
-            required=True
-        ),
-        "תאריך יעד": st.column_config.DateColumn(format="DD/MM/YYYY")
-    }
-)
-
-if st.button("💾 שמור שינויים לענן", type="primary", use_container_width=True):
-    if save_task(edited_df):
-        st.balloons()
-        st.success("נשמר בהצלחה!")
-        st.rerun()
-
-st.markdown('<br><p style="text-align:center; opacity:0.5;">ISO Dashboard 2.0</p>', unsafe_allow_html=True)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
