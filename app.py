@@ -6,7 +6,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 # ============================================
-# הגדרות עמוד (חובה שורה ראשונה)
+# הגדרות עמוד
 # ============================================
 st.set_page_config(
     page_title="ISO Smart Dashboard 2.0",
@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # ============================================
-# עיצוב CSS מתקדם - ניאון וסייברפאנק
+# עיצוב CSS - ניאון וסייברפאנק (נשאר אותו דבר)
 # ============================================
 st.markdown("""
 <style>
@@ -26,25 +26,16 @@ st.markdown("""
         color: #FAFAFA !important;
     }
     
-    /* כותרת ראשית זוהרת */
+    /* כותרת ראשית */
     .main-title {
         text-align: center;
         color: #00FFFF !important;
         font-size: 3.5rem;
         font-weight: bold;
         text-shadow: 0 0 10px #00FFFF, 0 0 20px #00FFFF;
-        margin-bottom: 0px;
     }
     
-    .sub-title {
-        text-align: center;
-        color: #FF00FF !important;
-        font-size: 1.2rem;
-        margin-bottom: 30px;
-        text-shadow: 0 0 5px #FF00FF;
-    }
-    
-    /* קופסת ספירה לאחור */
+    /* קופסת ספירה */
     .countdown-container {
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
         border: 2px solid #00FFFF;
@@ -62,41 +53,19 @@ st.markdown("""
         text-shadow: 0 0 20px #00FFFF;
         line-height: 1;
     }
-    
-    .countdown-label {
-        font-size: 1.2rem;
-        color: #FAFAFA;
-        opacity: 0.9;
-    }
-    
-    /* עיצוב כרטיסיות מדדים (KPI) */
+
+    /* תיקון צבעים למדדים */
+    [data-testid="stMetricValue"] { color: #00FFFF !important; }
+    [data-testid="stMetricLabel"] { color: #FAFAFA !important; }
     [data-testid="stMetric"] {
         background-color: #1a1a2e;
         border: 1px solid #FF00FF;
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 0 10px rgba(255, 0, 255, 0.2);
-    }
-    [data-testid="stMetricLabel"] { color: #FAFAFA !important; }
-    [data-testid="stMetricValue"] { color: #00FFFF !important; }
-
-    /* כפתורים */
-    .stButton > button {
-        background: linear-gradient(90deg, #00FFFF 0%, #007FFF 100%);
-        color: #000000 !important;
-        font-weight: bold;
-        border: none;
-        transition: all 0.3s ease;
-    }
-    .stButton > button:hover {
-        box-shadow: 0 0 15px #00FFFF;
-        transform: scale(1.02);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# הגדרות מערכת וחיבור Firebase
+# חיבור Firebase
 # ============================================
 SERVICE_ACCOUNT_KEY = "serviceAccountKey.json"
 COLLECTION_NAME = "tasks"
@@ -114,13 +83,13 @@ def get_db():
                 firebase_admin.initialize_app(cred)
         return firestore.client()
     except Exception as e:
-        st.error(f"שגיאת חיבור למסד הנתונים: {e}")
+        st.error(f"שגיאת חיבור: {e}")
         return None
 
 db = get_db()
 
 # ============================================
-# לוגיקה (פונקציות)
+# לוגיקה
 # ============================================
 def get_countdown():
     delta = TARGET_DATE - datetime.now()
@@ -138,14 +107,26 @@ def load_tasks():
         
         df = pd.DataFrame(items)
         if df.empty:
-            return pd.DataFrame(columns=["משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
+            return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
 
-        # ניקוי והמרות
+        # === סידור העמודה 'מסד' ===
+        if "מסד" not in df.columns:
+            df["מסד"] = 0 # אם אין, נשים 0
+        
+        # המרה למספרים (כדי ש-2 לא יבוא אחרי 10)
+        df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
+
+        # המרת תאריכים
         if "תאריך יעד" in df.columns:
             df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], errors='coerce').dt.date
         
+        # מילוי חוסרים
         if "סטטוס" not in df.columns: df["סטטוס"] = "טרם התחיל"
         if "עדיפות" not in df.columns: df["עדיפות"] = "רגיל"
+        
+        # === המיון הקובע! ===
+        # ממיין את הטבלה לפי טור 'מסד' בסדר עולה (1, 2, 3...)
+        df = df.sort_values(by="מסד", ascending=True)
         
         return df.fillna("")
     except Exception as e:
@@ -159,11 +140,9 @@ def save_task(edited_df):
             data = row.to_dict()
             doc_id = data.pop("doc_id", None)
             
-            # תיקון תאריכים
             if isinstance(data.get("תאריך יעד"), (date, datetime)):
                 data["תאריך יעד"] = data["תאריך יעד"].strftime("%Y-%m-%d")
             
-            # הסרת שדות ריקים
             clean_data = {k: v for k, v in data.items() if v != "" and v is not None}
             clean_data["_updated_at"] = firestore.SERVER_TIMESTAMP
                 
@@ -177,72 +156,74 @@ def save_task(edited_df):
         return False
 
 # ============================================
-# בניית המסך (UI)
+# UI - תצוגה
 # ============================================
 
-# כותרת
 st.markdown('<div class="main-title">ISO Smart Dashboard</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">מערכת ניהול משימות 2.0 • Firebase Cloud Edition</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title" style="text-align:center; color:#FF00FF;">ניהול משימות מסודר לפי מס"ד</div>', unsafe_allow_html=True)
 
-# שעון עצר
+# שעון
 days, weeks = get_countdown()
 st.markdown(f"""
 <div class="countdown-container">
-    <div class="countdown-label">🎯 הזמן שנותר לביקורת:</div>
+    <div style="font-size:1.2rem; color:#FAFAFA;">🎯 זמן לביקורת:</div>
     <div class="countdown-number">{days}</div>
-    <div class="countdown-label">ימים (כ-{weeks} שבועות)</div>
+    <div style="font-size:1.2rem; color:#FAFAFA;">ימים</div>
 </div>
 """, unsafe_allow_html=True)
 
-# טעינת נתונים
+# טעינה
 df = load_tasks()
 
-# מדדים (KPIs)
+# מדדים
 if not df.empty:
-    col1, col2, col3 = st.columns(3)
-    
-    total = len(df)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📋 סה\"כ משימות", len(df))
     done = len(df[df['סטטוס'].astype(str).str.contains('בוצע')]) if 'סטטוס' in df.columns else 0
+    c2.metric("✅ בוצעו", done)
     critical = len(df[df['עדיפות'] == 'קריטי']) if 'עדיפות' in df.columns else 0
+    c3.metric("🚨 קריטי", critical)
     
-    col1.metric("📋 סה\"כ משימות", total)
-    col2.metric("✅ בוצעו בהצלחה", done)
-    col3.metric("🚨 קריטי לטיפול", critical)
+    st.divider()
     
-    st.markdown("---")
-    
-    # גרף פאי
-    st.markdown("### 📊 סטטוס משימות")
+    # גרף
+    st.markdown("### 📊 תמונת מצב")
     if 'סטטוס' in df.columns:
         status_counts = df['סטטוס'].value_counts().reset_index()
         status_counts.columns = ['סטטוס', 'כמות']
-        
-        # צבעי ניאון לגרף
         fig = px.pie(status_counts, values='כמות', names='סטטוס', 
                      color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"],
                      hole=0.4)
-        
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="white", size=14),
-            showlegend=True
-        )
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", 
+                          font=dict(color="white"))
         st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("---")
+st.divider()
 
-# טבלה ראשית
+# טבלה
 st.markdown("### ✏️ רשימת המשימות")
-st.caption("ניתן לערוך ישירות בטבלה ולשמור. השינויים נשמרים בענן.")
+
+# כאן אנחנו מגדירים ש'מסד' יופיע ראשון ויהיה מספר
+column_order = ["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד"]
+# מוודאים שכל העמודות קיימות ב-df לפני שמסדרים
+existing_cols = [c for c in column_order if c in df.columns]
+# מוסיפים את שאר העמודות (כמו doc_id) בסוף
+remaining_cols = [c for c in df.columns if c not in existing_cols]
+final_order = existing_cols + remaining_cols
 
 edited_df = st.data_editor(
-    df,
+    df[final_order], # סידור העמודות
     num_rows="dynamic",
     use_container_width=True,
     key="editor",
     column_config={
         "doc_id": st.column_config.TextColumn(disabled=True),
+        "מסד": st.column_config.NumberColumn(
+            "מס\"ד", 
+            help="מספר סידורי",
+            step=1,
+            format="%d" # מציג מספר שלם בלי פסיקים
+        ),
         "משימה": st.column_config.TextColumn(width="large", required=True),
         "סטטוס": st.column_config.SelectboxColumn(
             options=["טרם התחיל", "בטיפול", "בוצע", "נתקע"],
@@ -256,12 +237,10 @@ edited_df = st.data_editor(
     }
 )
 
-# כפתור שמירה
 if st.button("💾 שמור שינויים לענן", type="primary", use_container_width=True):
     if save_task(edited_df):
-        st.balloons() # הבלונים חזרו!
-        st.success("הנתונים נשמרו בהצלחה ב-Firebase!")
+        st.balloons()
+        st.success("נשמר בהצלחה!")
         st.rerun()
 
-# קרדיט
-st.markdown('<br><p style="text-align:center; color:#007FFF; opacity:0.7;">ISO Dashboard 2.0 | Powered by Streamlit & Firebase</p>', unsafe_allow_html=True)
+st.markdown('<br><p style="text-align:center; opacity:0.5;">ISO Dashboard 2.0</p>', unsafe_allow_html=True)
