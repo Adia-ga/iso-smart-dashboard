@@ -5,10 +5,8 @@ from datetime import datetime, date
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- הגדרות עמוד ---
+# --- הגדרות ועיצוב ---
 st.set_page_config(page_title="ISO Smart Dashboard", page_icon="📋", layout="wide")
-
-# --- עיצוב CSS ---
 st.markdown("""
 <style>
     .stApp { background-color: #0E1117 !important; color: #FAFAFA !important; }
@@ -37,37 +35,29 @@ def get_db():
                 cred = credentials.Certificate(key_path)
                 firebase_admin.initialize_app(cred)
         return firestore.client()
-    except Exception as e:
-        st.error(f"Error: {e}")
-        return None
+    except: return None
 
 db = get_db()
 
-# --- לוגיקה ---
 def load_data():
     if db is None: return pd.DataFrame()
     try:
         docs = db.collection(collection_name).stream()
         data = [{"doc_id": doc.id, **doc.to_dict()} for doc in docs]
         df = pd.DataFrame(data)
+        if df.empty: return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
         
-        if df.empty:
-            return pd.DataFrame(columns=["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד", "doc_id"])
-
         if "מסד" in df.columns:
             df["מסד"] = pd.to_numeric(df["מסד"], errors='coerce').fillna(0).astype(int)
             df = df.sort_values(by="מסד", ascending=True)
-        else:
-            df["מסד"] = 0
-
+        else: df["מסד"] = 0
+            
         if "תאריך יעד" in df.columns:
             df["תאריך יעד"] = pd.to_datetime(df["תאריך יעד"], errors='coerce').dt.date
-
         return df.fillna("")
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
-def save_data(edited_df):
+    def save_data(edited_df):
     if db is None: return
     try:
         for i, row in edited_df.iterrows():
@@ -75,52 +65,38 @@ def save_data(edited_df):
             doc_id = d.pop("doc_id", None)
             if isinstance(d.get("תאריך יעד"), (date, datetime)):
                 d["תאריך יעד"] = d["תאריך יעד"].strftime("%Y-%m-%d")
-            
             clean = {k: v for k, v in d.items() if v != "" and v is not None}
             clean["_updated_at"] = firestore.SERVER_TIMESTAMP
-            
             if doc_id and len(str(doc_id)) > 5:
                 db.collection(collection_name).document(doc_id).set(clean, merge=True)
             else:
                 db.collection(collection_name).add(clean)
         return True
-    except:
-        return False
+    except: return False
 
 # --- תצוגה ---
 st.markdown('<div class="main-title">ISO Smart Dashboard</div>', unsafe_allow_html=True)
-
 delta = target_date - datetime.now()
-st.markdown(f"""
-<div class="countdown-box">
-    <div style="color:#FAFAFA;">🎯 ימים לביקורת:</div>
-    <div class="cnt-num">{delta.days}</div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown(f'<div class="countdown-box"><div style="color:#FAFAFA;">🎯 ימים לביקורת:</div><div class="cnt-num">{delta.days}</div></div>', unsafe_allow_html=True)
 
 df = load_data()
-
 if not df.empty:
     c1, c2, c3 = st.columns(3)
     c1.metric("📋 סה\"כ", len(df))
-    done_count = len(df[df['סטטוס'].astype(str).str.contains('בוצע')]) if 'סטטוס' in df.columns else 0
-    c2.metric("✅ בוצעו", done_count)
-    crit_count = len(df[df['עדיפות'] == 'קריטי']) if 'עדיפות' in df.columns else 0
-    c3.metric("🚨 קריטי", crit_count)
-    
+    done = len(df[df['סטטוס'].astype(str).str.contains('בוצע')]) if 'סטטוס' in df.columns else 0
+    c2.metric("✅ בוצעו", done)
+    crit = len(df[df['עדיפות'] == 'קריטי']) if 'עדיפות' in df.columns else 0
+    c3.metric("🚨 קריטי", crit)
     st.divider()
-    
     if 'סטטוס' in df.columns:
         counts = df['סטטוס'].value_counts().reset_index()
         counts.columns = ['סטטוס', 'כמות']
-        fig = px.pie(counts, values='כמות', names='סטטוס', hole=0.4,
-                     color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"])
+        fig = px.pie(counts, values='כמות', names='סטטוס', hole=0.4, color_discrete_sequence=["#00FFFF", "#FF00FF", "#39FF14", "#FFFF00"])
         fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
         st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
-st.markdown("### ✏️ רשימת משימות (ממוין לפי מסד)")
-
+st.markdown("### ✏️ רשימת משימות")
 cols = ["מסד", "משימה", "סטטוס", "עדיפות", "תאריך יעד"]
 final_cols = [c for c in cols if c in df.columns] + [c for c in df.columns if c not in cols]
 
@@ -131,3 +107,15 @@ edited = st.data_editor(
     key="editor",
     column_config={
         "doc_id": st.column_config.TextColumn(disabled=True),
+        "מסד": st.column_config.NumberColumn(format="%d", step=1, width="small"),
+        "משימה": st.column_config.TextColumn(width="large"),
+        "סטטוס": st.column_config.SelectboxColumn(options=["טרם התחיל", "בטיפול", "בוצע", "נתקע"]),
+        "עדיפות": st.column_config.SelectboxColumn(options=["רגיל", "גבוה", "קריטי"]),
+        "תאריך יעד": st.column_config.DateColumn(format="DD/MM/YYYY")
+    }
+)
+
+if st.button("💾 שמור שינויים", type="primary", use_container_width=True):
+    if save_data(edited):
+        st.success("נשמר!")
+        st.rerun()
